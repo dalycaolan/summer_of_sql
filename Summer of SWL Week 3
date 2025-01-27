@@ -1,0 +1,246 @@
+-- Part A customer stories
+
+select *
+from subscriptions S
+inner join plans P
+on S.plan_id=P.plan_id
+
+where customer_ID <=8;
+
+// Part B
+
+-- Q1. How many customers?
+
+select count(distinct(customer_id)) as customer_count
+from subscriptions;
+
+--Q2. 
+
+select
+
+date_trunc('month', start_date) as start_month, count(customer_id) as started_trials
+from subscriptions
+where plan_id=0
+group by start_month;
+
+--Q3. After 2020?
+
+select  min(s.plan_id) as plan_id, p.plan_name, count(*) as count_of_events
+from subscriptions s
+inner join plans p
+on s.plan_id=p.plan_id
+where date_part('year', start_date)>2020
+group by p.plan_name
+order by plan_id;
+
+--Q4. 
+
+with total_customers as 
+(
+select
+count(distinct(customer_id)) as joined_customers, 1 as joining_key
+from subscriptions
+),
+
+churned_customers as
+
+(
+select
+count(distinct(customer_id)) as churned_customers, 1 as joining_key
+from subscriptions
+where plan_id=4)
+
+select joined_customers, churned_customers, churned_customers/joined_customers*100 as percentage_churned from 
+total_customers A
+inner join churned_customers B 
+on A.joining_key=B.joining_key
+;
+--Q5. How many customers straight churn?
+
+with immediate_churn as
+(
+SELECT customer_id,
+   LISTAGG(plan_id, ', ')
+     WITHIN GROUP (ORDER BY plan_id ASC) as customer_journey
+  FROM subscriptions
+  GROUP BY customer_id
+  having customer_journey='0, 4'  )
+,
+
+count_of_churners as
+(
+select count(*) as churner_numbers, 1 as joining_key
+from immediate_churn
+),
+
+total_customers as
+(
+select
+count(distinct(customer_id)) as subscriber_numbers, 1 as joining_key
+from subscriptions
+)
+select subscriber_numbers
+, churner_numbers, round(churner_numbers/subscriber_numbers*100, 1)
+from total_customers A
+inner join count_of_churners B
+on A.joining_key=B.joining_key;
+
+-- Q 6 proportion on different plans
+
+with customer_plans as
+(
+select 
+plan_name, customer_id, 
+row_number() over(partition by customer_id order by start_date asc) as rn
+from subscriptions S
+inner join plans P
+on S.plan_id=P.plan_id
+)
+
+select plan_name, count(customer_id) as customer_count, 
+round((count(customer_id)/ (select count(distinct customer_id) from customer_plans))*100,1) as proportion
+from customer_plans
+where rn=2
+group by plan_name;
+
+--Q7. Breakdown of plan values at 2020-12-31?
+with current_subscriptions as (
+select *, 
+
+row_number() over(partition by customer_id order by start_date desc) as rn
+from subscriptions
+where start_date>'2020-12-31'
+)
+
+select plan_name, count(s.customer_id) as current_subscriptions ,
+round(count(customer_id)/(select count(distinct customer_id) from current_subscriptions)*100, 1) as percent_of_total
+from current_subscriptions S
+inner join plans P
+on P.plan_id=S.plan_id
+where rn=1
+group by plan_name;
+
+--Q8. How many upgraded to annual plan in 2020?
+
+with monthly_customers as (
+select customer_id, start_date
+from subscriptions
+where date_part('year',start_date)<=2020
+and plan_id=1 or plan_id=2
+)
+
+,upgraded_customers as
+(
+select
+customer_id, start_date
+
+from subscriptions S
+where date_part('year', start_date)=2020
+and plan_id=3
+)
+
+select count(distinct(M.customer_id)) as number_of_monthly_to_annual_2020
+from upgraded_customers U
+inner join monthly_customers M
+on U.customer_id=M.customer_id
+and M.start_date<=U.start_date;
+
+--Q9 How many days does it take to upgrade?
+
+with ordered_joins as
+(
+select
+customer_id, row_number() over(partition by customer_id order by start_date::date) as rn, start_date, plan_id
+from subscriptions
+)
+,
+first_join as
+(
+select * from ordered_joins
+where rn=1
+),
+
+date_of_upgrade as
+
+(select *
+from subscriptions
+where plan_id=3)
+
+select avg(datediff( 'day', A.start_date, B.start_date)), a.plan_id , b.plan_id
+from first_join A
+inner join date_of_upgrade B 
+on A.customer_id=B.customer_id
+group by a.plan_id, b.plan_id;
+
+
+--Q10. Breaking into bins
+
+with ordered_joins as
+(
+select
+customer_id, row_number() over(partition by customer_id order by start_date::date) as rn, start_date, plan_id
+from subscriptions
+)
+,
+first_join as
+(
+select * from ordered_joins
+where rn=1
+),
+
+date_of_upgrade as
+
+(select *
+from subscriptions
+where plan_id=3),
+
+joined_with_bins as
+
+( select F.customer_id, F.start_date join_date, U.start_date as upgrade_date,
+case
+when datediff('day', join_date, upgrade_date)<=30 then '0-30'
+when datediff('day', join_date, upgrade_date)<=60 then '31-60'
+when datediff('day', join_date, upgrade_date)<=90 then '61-90'
+when datediff('day', join_date, upgrade_date)<=120 then '91-120'
+when datediff('day', join_date, upgrade_date)<=150 then '121-150'
+when datediff('day', join_date, upgrade_date)<=180 then '151-180'
+when datediff('day', join_date, upgrade_date)<=210 then '181-210'
+when datediff('day', join_date, upgrade_date)<=240 then '211-240'
+when datediff('day', join_date, upgrade_date)<=270 then '241-270'
+when datediff('day', join_date, upgrade_date)<=300 then '271-300'
+when datediff('day', join_date, upgrade_date)<=330 then '301-330'
+when datediff('day', join_date, upgrade_date)<=360 then '331-360'
+end as upgrade_time
+from first_join F
+inner join date_of_upgrade U
+on F.customer_id=U.customer_id
+)
+
+select count(customer_id), upgrade_time
+from joined_with_bins
+group by upgrade_time;
+
+--Q11. How many customers downgraded from pro monthly to basic monthly in 2020?
+
+with pro_customers as (
+select customer_id, start_date
+from subscriptions
+where date_part('year',start_date)<=2020
+and plan_id=2
+)
+
+,downgraded_customers_in_2020 as
+(
+select
+customer_id, start_date
+
+from subscriptions
+where date_part('year', start_date)=2020
+and plan_id=1
+)
+
+select  P.start_date as pro_start, D.start_date as pro_downgrade
+from downgraded_customers_in_2020 D
+inner join pro_customers P
+on P.customer_id=D.customer_id
+and pro_start<=pro_downgrade;
