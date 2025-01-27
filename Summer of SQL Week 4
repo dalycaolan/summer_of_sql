@@ -1,0 +1,220 @@
+--2023 Week 5
+
+with monthly_totals as (
+select split_part(transaction_code, '-',1) as bank, date_trunc('month', 
+to_date(transaction_date, 'DD/MM/YYYY HH:MI:SS')) as transaction_month, value
+from PD2023_WK01
+),
+
+summed_months as (
+select bank, transaction_month, sum(value) as monthly_total,
+rank() over (partition by transaction_month order by sum(value) desc) as monthly_rank
+from monthly_totals
+group by bank, transaction_month
+),
+
+average_rank as
+(select
+bank,
+avg(monthly_rank) as month_rank
+from summed_months
+group by bank
+),
+
+average_values_rank as
+(
+select monthly_rank, avg(monthly_total)
+from summed_months S
+group by monthly_rank
+)
+
+select *
+from summed_months
+left join average_rank
+on average_rank.bank=summed_months.bank
+left join average_values_rank
+on summed_months.monthly_rank=average_values_rank.monthly_rank;
+
+--2023 Week 6
+
+with unpivoted_data as (
+select * from
+PD2023_WK06_DSB_CUSTOMER_SURVEY
+UNPIVOT (score for topic in
+(mobile_app___ease_of_use
+,mobile_app___ease_of_access
+,mobile_app___navigation
+,mobile_app___likelihood_to_recommend
+,mobile_app___overall_rating
+,online_interface___ease_of_use
+,online_interface___ease_of_access
+,online_interface___navigation
+,online_interface___likelihood_to_recommend
+,online_interface___overall_rating))
+)
+,
+with_labels as (
+select customer_id, split_part(topic, '___', 1) as platform, split_part(topic, '___', 2) as subject, score
+from unpivoted_data
+)
+
+, online_responses as
+
+(select * from 
+with_labels
+where platform='ONLINE_INTERFACE'
+)
+,
+mobile_app_responses as
+(select * from with_labels
+where platform='MOBILE_APP')
+,
+with_averages as
+(
+select o.customer_id, o.subject, o.score as online_score, m.score as app_score
+, avg(o.score) over (partition by o.customer_id) as online_avg
+, avg(m.score) over (partition by o.customer_id) as app_avg
+, online_avg-app_avg as diff,
+case 
+when diff <=-2 then 'app_superfan'
+when diff <=-1 then 'app fan'
+when diff >=2 then 'online superfan'
+when diff >=1 then 'online fan'
+else 'neutral'
+end as which_fan
+from online_responses o
+left join mobile_app_responses m
+on o.customer_id=m.customer_id
+and o.subject=m.subject
+where o.subject !='OVERALL_RATING'
+)
+
+select which_fan, round(count(*)/(select count(*) from with_averages)*100,1)
+from with_averages
+group by which_fan;
+
+--2023 Week 7
+with updated_account_info as
+(
+select account_number, account_type, value as account_holder_id, balance_date, balance
+from PD2023_WK07_ACCOUNT_INFORMATION
+,lateral split_to_table(account_holder_id, ', ')
+where account_holder_id is not null
+)
+,
+updated_account_holders as 
+(
+select account_holder_id, name, date_of_birth, 0||contact_number as contact_number, first_line_of_address
+from PD2023_WK07_ACCOUNT_HOLDERS
+)
+,
+accounts_joined as
+(
+select *
+from updated_account_holders A
+inner join updated_account_info B on
+A.account_holder_id=B.account_holder_id
+)
+, transactions as
+(
+select * from PD2023_WK07_TRANSACTION_DETAIL D
+inner join PD2023_WK07_TRANSACTION_PATH P
+on D.transaction_id=P.transaction_id 
+)
+
+select *
+from transactions
+inner join accounts_joined H
+on transactions.account_from=H.account_number
+where 
+cancelled_='N'
+and
+account_type!='Platinum'
+and value>1000
+
+;
+
+--2023 Week 8
+With unioned as
+(
+select 1 as file, *  from PD2023_WK08_01
+
+union all
+
+select 2 as file, *  from PD2023_WK08_02
+
+union all
+
+select 3 as file, *  from PD2023_WK08_03
+
+union all
+
+select 4 as file, *  from PD2023_WK08_04
+
+union all
+
+select 5 as file, *  from PD2023_WK08_05
+
+union all
+
+select 6 as file, *  from PD2023_WK08_06
+
+union all
+
+select 7 as file, *  from PD2023_WK08_07
+
+union all
+
+select 8 as file, *  from PD2023_WK08_08
+
+union all
+
+select 9 as file, *  from PD2023_WK08_09
+
+union all
+
+select 10 as file, *  from PD2023_WK08_10
+
+union all
+
+select 11 as file, *  from PD2023_WK08_11
+
+union all
+
+select 12 as file, *  from PD2023_WK08_12
+)
+, with_categories as
+(
+select *
+
+, case
+    when right(market_cap,1)='B' 
+        then replace(split_part(market_cap, 'B', 1),'$','')::float*1000000000
+    when right(market_cap,1)='M' 
+    then replace(split_part(market_cap, 'M', 1),'$','')::float*1000000
+    else 0
+    end as market_capital
+, case
+    when market_capital<=100000000 then 'Small'
+    when market_capital<=1000000000 then 'Medium'
+    when market_capital<=100000000000 then 'Large'
+    else 'Huge'
+    end as company_size
+, case
+    when replace(purchase_price, '$', '')::float <25000 then 'Low'
+    when replace(purchase_price, '$', '')::float <50000 then 'Medium'
+    when replace(purchase_price, '$', '')::float <75000 then 'High'
+    else 'Very High' end as purchase_price_category
+    , replace(purchase_price, '$', '') as numeric_purchase_price
+
+from unioned
+where market_cap <> 'n/a'
+)
+, ranked as
+(
+select *,
+rank() over (partition by file, company_size, purchase_price_category order by numeric_purchase_price) as rnk
+from with_categories
+)
+select * from ranked
+where rnk<=5
