@@ -1,0 +1,124 @@
+with cleaned_table as(
+
+select split_part(transaction_code, '-', 1) as Bank,
+case ONLINE_OR_IN_PERSON
+when 1 then 'Online'
+when 2 then 'In-Person'
+else null
+end as "online?",
+DAYNAME(
+    TO_TIMESTAMP(transaction_date, 'DD/MM/YYYY HH:MI:SS')
+) as weekday,
+VALUE,
+CUSTOMER_CODE
+from TIL_PLAYGROUND.PREPPIN_DATA_INPUTS.PD2023_WK01
+)
+
+--select bank, sum(value),
+--from cleaned_table
+--group by bank;
+
+--select 
+--bank, weekday, "online?", sum(value)
+--from cleaned_table
+--group by "online?",bank, weekday
+--order by bank, "online?", weekday
+
+select 
+bank, customer_code, sum(value)
+from cleaned_table
+group by bank, customer_code;
+
+// Preppin' Data 2023 Week 2
+
+select *
+
+from PD2023_WK02_SWIFT_CODES;
+
+select
+
+transaction_id, 'GB' || check_digits || B.swift_code ||
+replace(sort_code, '-','') ||  account_number as IBAN
+from PD2023_WK02_TRANSACTIONS A
+left join PD2023_WK02_SWIFT_CODES B
+on A.BANK=B.BANK;
+
+// Preppin' Data 2023 Week 3
+
+with dsb_targets
+as (
+SELECT online_or_in_person, replace(quarter, 'Q','')::number as quarter, targets
+  FROM PD2023_WK03_TARGETS
+    UNPIVOT (Targets FOR quarter IN (Q1, Q2, Q3, Q4))
+  ),
+Quarterly_sales as
+
+(select 
+
+sum(value) as total_sales, quarter(
+to_date(
+transaction_date, 'DD/MM/YYYY HH:MI:SS')) as quarter, case online_or_in_person 
+when 1 then 'Online'
+when 2 then 'In-Person'
+end as online_or_in_person
+from pd2023_wk01 A
+where transaction_code like 'DSB%'
+group by quarter, online_or_in_person)
+
+select total_sales, A.quarter, A.online_or_in_person, targets, total_sales-targets as diff_from_target
+from QUARTERLY_SALES A
+left join dsb_targets B
+on A.Quarter=B.Quarter;
+
+//Preppin' Data 2023 Week 4
+
+With Unioned_months as (
+select * , 'January' as tablemonth from PD2023_WK04_JANUARY
+union
+select *, 'February' as tablemonth from PD2023_WK04_FEBRUARY
+union
+select * , 'March' as tablemonth from PD2023_WK04_MARCH
+union
+select *, 'April' as tablemonth from PD2023_WK04_APRIL
+union
+select * , 'May' as tablemonth from PD2023_WK04_MAY
+union
+select *, 'June' as tablemonth from PD2023_WK04_JUNE
+union
+select *, 'July' as tablemonth from PD2023_WK04_JULY
+union
+select *, 'August' as tablemonth from PD2023_WK04_AUGUST
+union
+select *, 'September' as tablemonth from PD2023_WK04_SEPTEMBER
+union
+select *, 'October' as tablemonth from PD2023_WK04_OCTOBER
+union
+select *, 'November' as tablemonth from PD2023_WK04_NOVEMBER
+union
+select *, 'December' as tablemonth from PD2023_WK04_DECEMBER
+),
+
+with_joining_date as
+(
+select *, to_date(joining_day || ' ' || tablemonth || ' ' || 2023, 'DD MMMM YYYY') as joining_date
+from unioned_months
+),
+
+pivoted as 
+(
+select *,
+row_number() over(partition by ID order by joining_date ASC) as joining_order
+
+from with_joining_date
+PIVOT(max(value) FOR demographic IN ('Ethnicity','Account Type','Date of Birth')) AS P
+(id,
+joining_day,
+tablemonth,
+joining_date,
+ethnicity,
+account_type,
+date_of_birth)
+)
+
+select * from pivoted
+where joining_order=1
