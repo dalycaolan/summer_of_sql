@@ -1,0 +1,97 @@
+--Q1. How many nodes
+
+SELECT COUNT(distinct(node_id))
+from customer_nodes;
+
+--Q2. How many nodes per region
+
+select 
+	region_name
+    , count(distinct(node_id)) as distinct_nodes
+from customer_nodes N
+inner join regions R
+on N.region_id=R.region_id
+group by region_name;
+
+--Q3. How many customers per region
+
+select
+region_name,
+count( distinct customer_id) as number_of_customers
+from customer_nodes C
+inner join regions R
+on C.region_id=R.region_id
+group by region_name
+order by number_of_customers desc;
+
+--Q.4 average days in node
+
+with days_in_node as
+
+(
+select
+    customer_id
+    , node_id
+    , sum( datediff('day', start_date, end_date)) as total_days
+
+from customer_nodes
+where end_date<=current_date
+group by
+    customer_id
+    , node_id
+)
+
+select
+    round(avg(total_days),0) as avg_days_in_one_node
+from days_in_node;
+
+
+--Q5. statistics
+
+with days_in_node as
+
+(
+select
+    region_id
+    ,customer_id
+    , node_id
+    , sum( datediff('day', start_date, end_date)) as total_days
+
+from customer_nodes
+where end_date<=current_date
+group by
+    customer_id
+    , node_id
+    , region_id
+)
+
+, ordered as (
+    select
+        region_id
+        , row_number () over (partition by region_id order by total_days) as rn
+        ,total_days
+    from days_in_node
+)
+
+, max_row as (
+select 
+    region_id
+    ,max(rn) as max_rn
+from ordered
+group by region_id
+)
+
+select
+    region_name,
+    case
+        when round(rn,0)=round(max_rn/2,0) then 'median'
+        when round(rn,0)=round(max_rn*0.8,0) then 'Upper 80 pct.'
+        when round(rn,0)=round(max_rn*0.95,0) then 'Upper 95 pct.'
+        end as stats
+    , total_days
+from ordered O
+inner join max_row M
+on O.region_id=M.region_id
+inner join regions R
+on O.region_id=R.region_id
+where stats is not null
