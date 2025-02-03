@@ -1,0 +1,224 @@
+-- Preppin Data 2023 Week 9
+
+with transactions_out as 
+
+(
+
+select 
+    D.*
+    , account_from as account
+    ,'out' as in_or_out 
+from PD2023_WK07_TRANSACTION_DETAIL D
+left join PD2023_WK07_TRANSACTION_PATH P
+on D.TRANSACTION_ID=P.transaction_id
+where cancelled_='N'
+order by transaction_date
+
+)
+, transactions_in as
+(
+select 
+    D.*
+    , account_to as account
+    ,'in' as in_or_out 
+from PD2023_WK07_TRANSACTION_DETAIL D
+left join PD2023_WK07_TRANSACTION_PATH P
+on D.TRANSACTION_ID=P.transaction_id
+where cancelled_='N'
+order by transaction_date
+),
+
+transactions_unioned as
+(
+select * from transactions_out
+union all select * from transactions_in
+),
+
+transactions_cleaned
+as (
+
+select 
+    transaction_id
+    , transaction_date
+    , account
+    , case
+        when in_or_out='in'
+        then value
+        else -value
+        end as balanced_value
+    ,row_number() over (partition by transaction_date, account order by balanced_value desc) as rn
+from transactions_unioned
+order by account, transaction_date, rn
+)
+, transactions_rolled_up as
+
+(
+select
+
+account as account_number
+, transaction_date
+, balanced_value as day_value
+,balanced_value as transaction_value
+, row_number() over (partition by account_number, transaction_date order by abs(day_value)) as rn
+from transactions_cleaned
+)
+
+, january_balance as 
+(
+select account_number, balance_date as transaction_date, balance as balanced_value, NULL as transaction_value, 0 as rn
+from PD2023_WK07_ACCOUNT_INFORMATION
+),
+
+final_union as (
+
+select * from transactions_rolled_up
+union all 
+select * from january_balance
+order by account_number, transaction_date
+)
+
+select 
+    account_number
+    , transaction_date
+    , transaction_value
+    , day_value
+    ,rn
+    , sum (day_value) over (partition by account_number, transaction_date order by rn) as balance
+from final_union
+order by account_number, transaction_date, rn
+
+;
+
+-- Preppin Data 2023 Week 10
+
+with transactions_out as 
+
+(
+
+select 
+    D.*
+    , account_from as account
+    ,'out' as in_or_out 
+from PD2023_WK07_TRANSACTION_DETAIL D
+left join PD2023_WK07_TRANSACTION_PATH P
+on D.TRANSACTION_ID=P.transaction_id
+where cancelled_='N'
+order by transaction_date
+
+)
+, transactions_in as
+(
+select 
+    D.*
+    , account_to as account
+    ,'in' as in_or_out 
+from PD2023_WK07_TRANSACTION_DETAIL D
+left join PD2023_WK07_TRANSACTION_PATH P
+on D.TRANSACTION_ID=P.transaction_id
+where cancelled_='N'
+order by transaction_date
+),
+
+transactions_unioned as
+(
+select * from transactions_out
+union all select * from transactions_in
+),
+
+transactions_cleaned
+as (
+
+select 
+    transaction_id
+    , transaction_date
+    , account
+    , case
+        when in_or_out='in'
+        then value
+        else -value
+        end as balanced_value
+    ,row_number() over (partition by transaction_date, account order by balanced_value desc) as rn
+from transactions_unioned
+order by account, transaction_date, rn
+)
+, transactions_rolled_up as
+
+(
+select
+
+account as account_number
+, transaction_date
+, balanced_value as day_value
+,balanced_value as transaction_value
+, row_number() over (partition by account_number, transaction_date order by abs(day_value)) as rn
+from transactions_cleaned
+)
+
+, january_balance as 
+(
+select account_number, balance_date as transaction_date, balance as balanced_value, NULL as transaction_value, 0 as rn
+from PD2023_WK07_ACCOUNT_INFORMATION
+),
+
+final_union as (
+
+select * from transactions_rolled_up
+union all 
+select * from january_balance
+order by account_number, transaction_date
+),
+
+week_9_output as
+(
+
+select 
+    account_number
+    , transaction_date
+    , transaction_value
+    , day_value
+    , rn
+    , sum (day_value) over (partition by account_number, transaction_date order by rn) as balance
+from final_union
+order by account_number, transaction_date, rn
+) ,
+daily_totals as
+(
+select 
+account_number,
+transaction_date,
+sum(transaction_value) as daily_sum
+from week_9_output
+group by account_number, transaction_date
+)
+
+select *, row_number() over (partition by account_number, transaction_date order by daily_sum) as rn
+
+from daily_totals
+order by rn asc;
+; 
+--Not finished yet
+
+--2023 Week 11
+
+with appended_tables as
+(
+select * from pd2023_wk11_dsb_customer_locations
+cross join pd2023_wk11_dsb_branches
+),
+
+ordered_table as
+(
+select *, st_makepoint(branch_long,branch_lat) as branch_coords
+, st_makepoint(address_long,address_lat) as cust_coords,
+st_distance(branch_coords,cust_coords) as branch_distance,
+from appended_tables
+),
+rownumber_added as
+(
+select *,
+row_number() over (partition by customer order by branch_distance asc) as rn
+from ordered_table
+)
+select customer, branch, address_lat, address_long, branch_lat, branch_long, round(branch_distance, 2) as dist,
+row_number() over (partition by branch order by dist asc) as customer_priority from rownumber_added,
+where rn=1;
